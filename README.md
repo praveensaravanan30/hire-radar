@@ -100,35 +100,105 @@ Get a free Groq key at [console.groq.com](https://console.groq.com) — takes 60
 
 ---
 
-## Usage
+## Daily workflow
 
 ```bash
 cd tracker
+```
 
-# Interactive 4-stage flow (recommended)
+### Step 1 — Search for new jobs
+
+```bash
+# Interactive — walks you through all 4 stages (recommended)
 .venv/bin/python tracker.py
 
-# Skip menu — run specific role directly
+# Or skip the menu and go direct with a role
 .venv/bin/python tracker.py --role dv
-.venv/bin/python tracker.py --role rtl --keywords "gpu arm"
-.venv/bin/python tracker.py --role ai_infra --keywords "llm eval"
+.venv/bin/python tracker.py --role rtl
+.venv/bin/python tracker.py --role ai_infra
+.venv/bin/python tracker.py --role uarch --keywords "gpu arm"
+```
 
-# Run all roles at once (good for cron)
-.venv/bin/python tracker.py --all
+The tracker fetches jobs, scores each one 0–10 against your resume, and fires a macOS notification for every match ≥ 6/10.
 
-# Run on a schedule (every 3 hours)
-.venv/bin/python tracker.py --loop --role dv
+### Step 2 — Browse matches and apply
 
-# Show kanban lifecycle view
+```bash
+.venv/bin/python tracker.py --browse
+```
+
+Shows a numbered list of all new jobs:
+
+```
+   1.  9/10  Career Accelerator Program - DV Engineer  @ Texas Instruments · Tucson · HW/DV
+             https://www.adzuna.com/details/5777173457...
+
+   2.  9/10  Senior Verification Engineer  @ NVIDIA · California · HW/DV
+             https://www.adzuna.com/details/5780964904...
+
+   3.  9/10  Sr. Engineer, CPU RTL Design  @ Tenstorrent · Austin · HW/DV
+             https://job-boards.greenhouse.io/tenstorrent/jobs/5145404007
+```
+
+Then it prompts you:
+
+```
+Open in browser — type numbers (e.g. 1 3 5) or all or Enter to skip
+> 1 2 3
+
+  [opens all 3 in browser tabs — go apply on the site]
+
+Press Enter when ready to mark statuses
+
+Mark as applied — type numbers or Enter to skip
+> 1 3
+
+Mark as skipped — type numbers or Enter to skip
+> 2
+```
+
+### Step 3 — Check your pipeline
+
+```bash
 .venv/bin/python tracker.py --digest
+```
 
-# Update a job's status
-.venv/bin/python tracker.py --update "tenstorrent/jobs/4659518007" reviewed
-.venv/bin/python tracker.py --update "5777429351" applied
+Shows all jobs grouped by lifecycle status: **New → Reviewed → Applied → Interviewing → Offers → Rejected**
+
+### Step 4 — Update a job status anytime
+
+```bash
+# After an interview, rejection, or offer — paste any unique part of the URL
 .venv/bin/python tracker.py --update "nvidia" interviewing
+.venv/bin/python tracker.py --update "tenstorrent/jobs/4659518007" reviewed
+.venv/bin/python tracker.py --update "5777429351" offer
+.venv/bin/python tracker.py --update "cisco" rejected
 ```
 
 **Lifecycle statuses:** `new` → `reviewed` → `applied` → `interviewing` → `offer` / `rejected` / `skipped`
+
+> **Note on deduplication:** Once a job is seen it is permanently stored in `jobs.db`. It will never appear again in future searches regardless of its status — no duplicate notifications, ever.
+
+---
+
+## All commands
+
+```bash
+# Search
+.venv/bin/python tracker.py                          # interactive 4-stage flow
+.venv/bin/python tracker.py --role dv                # skip menu, specific role
+.venv/bin/python tracker.py --role rtl --keywords "gpu arm"
+.venv/bin/python tracker.py --all                    # run all roles at once (cron)
+.venv/bin/python tracker.py --loop --role dv         # run on a 3-hour schedule
+
+# Review & apply
+.venv/bin/python tracker.py --browse                 # batch list — open + bulk mark
+.venv/bin/python tracker.py --review                 # one-by-one review with browser open
+
+# Track
+.venv/bin/python tracker.py --digest                 # kanban pipeline view
+.venv/bin/python tracker.py --update "<fragment>" <status>  # update job status
+```
 
 ---
 
