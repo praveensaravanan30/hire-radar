@@ -735,6 +735,94 @@ def run_check(
     )
 
 
+def browse_and_apply(con: sqlite3.Connection):
+    """
+    Show all new matched jobs as a numbered list.
+    Type numbers to open in browser, then mark which ones you applied to.
+    """
+    rows = con.execute(
+        "SELECT id, score, title, company, location, url, role_track, role_key, reason "
+        "FROM jobs WHERE status='new' AND score >= ? ORDER BY score DESC",
+        (MIN_SCORE,),
+    ).fetchall()
+
+    if not rows:
+        console.print("[yellow]No new jobs. Run the tracker first.[/yellow]")
+        return
+
+    # Print numbered list
+    console.print()
+    console.rule("[bold cyan]New Job Matches[/bold cyan]")
+    console.print()
+
+    for i, (jid, score, title, company, location, url, track, rkey, reason) in enumerate(rows, 1):
+        sc = "green" if score >= 8 else "yellow"
+        loc = location.split(",")[0].strip() if location else "Remote"
+        console.print(
+            f"  [bold cyan]{i:>2}.[/bold cyan] [{sc}]{score}/10[/{sc}]  "
+            f"[bold]{title}[/bold]  [dim]@ {company} · {loc} · {track}/{rkey}[/dim]"
+        )
+        if reason:
+            console.print(f"      [dim italic]{reason}[/dim italic]")
+        console.print(f"      [dim]{url[:90]}[/dim]\n")
+
+    console.print(f"[dim]── {len(rows)} jobs total ──[/dim]\n")
+
+    # Step 1: open in browser
+    open_input = Prompt.ask(
+        "Open in browser — type numbers separated by spaces (e.g. [bold]1 3 5[/bold]) or [bold]all[/bold] or Enter to skip"
+    ).strip().lower()
+
+    to_open: list[int] = []
+    if open_input == "all":
+        to_open = list(range(1, len(rows) + 1))
+    elif open_input:
+        to_open = [int(x) for x in open_input.split() if x.isdigit() and 1 <= int(x) <= len(rows)]
+
+    for n in to_open:
+        url = rows[n - 1][5]
+        subprocess.run(["open", url], capture_output=True)
+        console.print(f"  [dim]Opened #{n}: {url[:70]}[/dim]")
+
+    if to_open:
+        console.print(f"\n[dim]Opened {len(to_open)} jobs. Go apply, then come back here.[/dim]")
+        Prompt.ask("\nPress Enter when you're ready to mark statuses", default="")
+
+    # Step 2: mark applied
+    applied_input = Prompt.ask(
+        "Mark as [bold green]applied[/bold green] — type numbers (e.g. [bold]1 3[/bold]) or Enter to skip"
+    ).strip()
+    _bulk_update(con, rows, applied_input, "applied", "green")
+
+    # Step 3: mark skipped
+    skip_input = Prompt.ask(
+        "Mark as [bold yellow]skipped[/bold yellow] — type numbers or Enter to skip"
+    ).strip()
+    _bulk_update(con, rows, skip_input, "skipped", "yellow")
+
+    # Step 4: mark reviewed (save for later)
+    review_input = Prompt.ask(
+        "Mark as [bold blue]reviewed[/bold blue] (save for later) — type numbers or Enter to skip"
+    ).strip()
+    _bulk_update(con, rows, review_input, "reviewed", "blue")
+
+    # Remaining unmarked stay as 'new'
+    console.print()
+    console.print("[dim]Done. Unmarked jobs stay as 'new'. Run --digest to see your full pipeline.[/dim]\n")
+
+
+def _bulk_update(con, rows, input_str, status, color):
+    if not input_str:
+        return
+    nums = [int(x) for x in input_str.split() if x.isdigit() and 1 <= int(x) <= len(rows)]
+    for n in nums:
+        jid = rows[n - 1][0]
+        title = rows[n - 1][2]
+        company = rows[n - 1][3]
+        update_status(con, jid, status)
+        console.print(f"  [{color}]→ {status}[/{color}]  {title} @ {company}")
+
+
 def interactive_review(con: sqlite3.Connection):
     """
     Go through every 'new' job one by one, sorted by score desc.
@@ -902,7 +990,9 @@ def main():
     parser.add_argument("--digest", action="store_true",
                         help="Print kanban lifecycle view and exit")
     parser.add_argument("--review", action="store_true",
-                        help="Interactively review new jobs one by one, open in browser, mark status")
+                        help="Review new jobs one by one, open in browser, mark status")
+    parser.add_argument("--browse", action="store_true",
+                        help="See all new jobs as a list, open multiple in browser, bulk-mark applied")
     parser.add_argument("--update", nargs=2, metavar=("URL_FRAGMENT", "STATUS"),
                         help=f"Update job status. Statuses: {', '.join(LIFECYCLE_STATUSES)}")
     args = parser.parse_args()
@@ -919,6 +1009,10 @@ def main():
 
     if args.digest:
         print_digest(con)
+        return
+
+    if args.browse:
+        browse_and_apply(con)
         return
 
     if args.review:
