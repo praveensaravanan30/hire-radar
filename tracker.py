@@ -735,6 +735,86 @@ def run_check(
     )
 
 
+def interactive_review(con: sqlite3.Connection):
+    """
+    Go through every 'new' job one by one, sorted by score desc.
+    Keys:
+      o — open URL in browser
+      a — mark applied
+      r — mark reviewed (save for later)
+      s — skip (mark skipped)
+      x — reject
+      q — quit and save progress
+    """
+    rows = con.execute(
+        "SELECT id, role_track, role_key, score, title, company, location, url, reason, source "
+        "FROM jobs WHERE status='new' AND score >= ? ORDER BY score DESC",
+        (MIN_SCORE,),
+    ).fetchall()
+
+    if not rows:
+        console.print("[yellow]No new jobs to review. Run the tracker first or check --digest.[/yellow]")
+        return
+
+    total = len(rows)
+    console.print(f"\n[bold]Review mode[/bold] — {total} new jobs, sorted by score\n")
+    console.print(
+        "  [bold cyan]o[/bold cyan] open in browser  "
+        "[bold green]a[/bold green] applied  "
+        "[bold blue]r[/bold blue] reviewed/save  "
+        "[bold yellow]s[/bold yellow] skip  "
+        "[bold red]x[/bold red] reject  "
+        "[bold]q[/bold] quit\n"
+    )
+
+    for idx, (jid, track, rkey, score, title, company, location, url, reason, source) in enumerate(rows, 1):
+        sc_color = "green" if score >= 8 else "yellow"
+
+        # Job card
+        console.rule(f"[dim]{idx}/{total}[/dim]")
+        console.print(f"\n  [{sc_color}][bold]{score}/10[/bold][/{sc_color}]  "
+                      f"[bold white]{title}[/bold white]")
+        console.print(f"  [bold]{company}[/bold]  ·  {location or 'Location not listed'}  "
+                      f"·  [dim]{track}/{rkey}[/dim]  ·  [dim]{source}[/dim]")
+        if reason:
+            console.print(f"  [italic dim]{reason}[/italic dim]")
+        console.print(f"  [dim][link={url}]{url}[/link][/dim]\n")
+
+        # Action prompt — loop until valid input
+        opened = False
+        while True:
+            raw = Prompt.ask(
+                "  Action",
+                choices=["o", "a", "r", "s", "x", "q"],
+                default="r",
+                show_choices=True,
+            ).strip().lower()
+
+            if raw == "o":
+                subprocess.run(["open", url], capture_output=True)
+                if not opened:
+                    console.print("  [dim]Opened in browser — enter your action after reviewing[/dim]")
+                    opened = True
+                continue  # stay on same job so they can act after viewing
+
+            if raw == "q":
+                remaining = total - idx
+                console.print(f"\n[dim]Saved progress. {remaining} jobs remaining.[/dim]")
+                return
+
+            status_map = {"a": "applied", "r": "reviewed", "s": "skipped", "x": "rejected"}
+            new_status = status_map[raw]
+            update_status(con, jid, new_status)
+
+            label_color = {"applied": "green", "reviewed": "blue",
+                           "skipped": "yellow", "rejected": "red"}[new_status]
+            console.print(f"  [{label_color}]→ {new_status}[/{label_color}]\n")
+            break
+
+    console.print(f"\n[bold green]All {total} jobs reviewed.[/bold green]")
+    console.print("Run [bold].venv/bin/python tracker.py --digest[/bold] to see your full pipeline.\n")
+
+
 def print_digest(con: sqlite3.Connection):
     """Kanban-style digest grouped by lifecycle status."""
     # Status display order and colors
@@ -821,6 +901,8 @@ def main():
                         help="Run on a schedule (CHECK_INTERVAL_HOURS)")
     parser.add_argument("--digest", action="store_true",
                         help="Print kanban lifecycle view and exit")
+    parser.add_argument("--review", action="store_true",
+                        help="Interactively review new jobs one by one, open in browser, mark status")
     parser.add_argument("--update", nargs=2, metavar=("URL_FRAGMENT", "STATUS"),
                         help=f"Update job status. Statuses: {', '.join(LIFECYCLE_STATUSES)}")
     args = parser.parse_args()
@@ -837,6 +919,10 @@ def main():
 
     if args.digest:
         print_digest(con)
+        return
+
+    if args.review:
+        interactive_review(con)
         return
 
     if args.update:
